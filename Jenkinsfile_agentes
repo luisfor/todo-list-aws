@@ -31,7 +31,7 @@ pipeline {
                 branch 'develop'
             }
             agent {
-                label 'agente-mac' // Adaptado a tu nodo local
+                label 'static-agent' // IMPORTANTE: Ajustar etiqueta del agente en Jenkins
             }
             steps {
                 echo "Ejecutando pruebas estáticas (Flake8 y Bandit) en agente dedicado..."
@@ -73,7 +73,7 @@ pipeline {
 
         stage('Rest Test') {
             agent {
-                label 'agente-mac' // Adaptado a tu nodo local
+                label 'rest-agent' // IMPORTANTE: Ajustar etiqueta del agente en Jenkins
             }
             steps {
                 echo "Ejecutando pruebas de API Rest (Pytest) en agente dedicado..."
