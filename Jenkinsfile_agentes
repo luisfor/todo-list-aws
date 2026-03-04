@@ -1,0 +1,127 @@
+pipeline {
+    agent any // Base node execution by default
+
+    environment {
+        // Configuraciones de repositorios
+        CONFIG_REPO_URL = "https://github.com/luisfor/todo-list-aws-config.git" // IMPORTANTE: Cambia a tu repositorio real
+        
+        // Variables auxiliares calculadas dependiendo de la rama
+        ENV_NAME = "${env.BRANCH_NAME == 'master' ? 'production' : 'staging'}"
+        STACK_NAME = "todo-list-aws-${ENV_NAME}"
+    }
+
+    stages {
+        stage('Get Code') {
+            steps {
+                echo "Descargando código de la rama: ${env.BRANCH_NAME}"
+                checkout scm
+                
+                echo "Descargando samconfig.toml desde el repositorio de configuración..."
+                // Descargamos el samconfig.toml desde la rama correspondiente (staging o production)
+                sh """
+                    git clone --branch ${ENV_NAME} --single-branch ${CONFIG_REPO_URL} config-repo
+                    cp config-repo/samconfig.toml ./samconfig.toml
+                    rm -rf config-repo
+                """
+            }
+        }
+
+        stage('Static Test') {
+            when {
+                branch 'develop'
+            }
+            agent {
+                label 'static-agent' // IMPORTANTE: Ajustar etiqueta del agente en Jenkins
+            }
+            steps {
+                echo "Ejecutando pruebas estáticas (Flake8 y Bandit) en agente dedicado..."
+                // Nos aseguramos de tener el código, ya que el agente tiene su propio workspace
+                checkout scm
+                
+                sh '''
+                    # Crear entorno e instalar dependencias
+                    python3 -m venv venv
+                    . venv/bin/activate
+                    pip install flake8 bandit
+                    
+                    # Ejecutar flake8 (reporte flake8_report.txt)
+                    flake8 src/ > flake8_report.txt || echo "Flake8 enconró hallazgos, pero continuamos"
+                    
+                    # Ejecutar bandit (reporte bandit_report.json)
+                    bandit -r src/ -f json -o bandit_report.json || echo "Bandit encontró hallazgos, pero continuamos"
+                '''
+                
+                // Archivar los reportes generados
+                archiveArtifacts artifacts: 'flake8_report.txt, bandit_report.json', allowEmptyArchive: false
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                echo "Desplegando en entorno: ${ENV_NAME}"
+                sh 'sam build'
+                // samconfig.toml descargado en Get Code proporcionará todas las configuraciones automáticas (stack, bucket, config-env...)
+                sh "sam deploy --no-confirm-changeset --no-fail-on-empty-changeset"
+
+                // Obtener URL de la API desplegada para las siguientes pruebas
+                sh "aws cloudformation describe-stacks --stack-name ${STACK_NAME} --query 'Stacks[0].Outputs[?OutputKey==`ApiUrl`].OutputValue' --output text > api_url.txt"
+                
+                // Guardarlo en Jenkins para el otro agente, y empaquetar archivos necesarios para testing
+                stash name: 'testing-data', includes: 'api_url.txt, test/integration/**, tests/requirements.txt'
+            }
+        }
+
+        stage('Rest Test') {
+            agent {
+                label 'rest-agent' // IMPORTANTE: Ajustar etiqueta del agente en Jenkins
+            }
+            steps {
+                echo "Ejecutando pruebas de API Rest (Pytest) en agente dedicado..."
+                
+                // Limpiar workspace por si acaso y recuperar los archivos y la URL
+                deleteDir()
+                unstash 'testing-data'
+                
+                script {
+                    def apiUrl = sh(script: 'cat api_url.txt', returnStdout: true).trim()
+                    echo "Validando contra la API en: ${apiUrl}"
+                    
+                    sh """
+                        python3 -m venv venv
+                        . venv/bin/activate
+                        pip install pytest requests
+                        
+                        # Setear variable de entorno requerida por los tests de integracion
+                        export BASE_URL="${apiUrl}"
+                        
+                        # En caso de la rama 'master', el examen demanda ejecutar solo pruebas de REAODNLY
+                        # Si es 'develop', se ejecutan toads. Ajustamos el comando pytest:
+                        if [ "${env.BRANCH_NAME}" = "master" ]; then
+                            echo "Modo CD (Production). Limitando pytest a consultas Read-Only"
+                            pytest test/integration/todoApiTest.py -k "test_api_listtodos" -v
+                        else
+                            echo "Modo CI (Staging). Ejecutando todas las pruebas de integracion"
+                            pytest test/integration/todoApiTest.py -v
+                        fi
+                    """
+                }
+            }
+        }
+
+        stage('Promote') {
+            when {
+                branch 'develop'
+            }
+            steps {
+                echo "Todas las pruebas exitosas. Promoviendo a master..."
+                sh '''
+                    git config user.name "Jenkins CI/CD"
+                    git config user.email "jenkins@example.com"
+                    git checkout master
+                    git merge develop --no-ff -m "Merge develop to master tras CI exitosa en Jenkins"
+                    git push origin master
+                '''
+            }
+        }
+    }
+}
