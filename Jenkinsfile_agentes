@@ -64,7 +64,7 @@ pipeline {
                 sh "sam deploy --resolve-s3 --no-confirm-changeset --no-fail-on-empty-changeset"
 
                 // Obtener URL de la API desplegada para las siguientes pruebas
-                sh "aws cloudformation describe-stacks --stack-name ${STACK_NAME} --query 'Stacks[0].Outputs[?OutputKey==`ApiUrl`].OutputValue' --output text > api_url.txt"
+                sh "aws cloudformation describe-stacks --stack-name ${STACK_NAME} --query 'Stacks[0].Outputs[?OutputKey==`BaseUrlApi`].OutputValue' --output text > api_url.txt"
                 
                 // Guardarlo en Jenkins para el otro agente, y empaquetar archivos necesarios para testing
                 stash name: 'testing-data', includes: 'api_url.txt, test/integration/**, tests/requirements.txt'
