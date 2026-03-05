@@ -61,7 +61,7 @@ pipeline {
                 echo "Desplegando en entorno: ${ENV_NAME}"
                 sh 'sam build'
                 // samconfig.toml descargado en Get Code proporcionará todas las configuraciones automáticas (stack, bucket, config-env...)
-                sh "sam deploy --no-confirm-changeset --no-fail-on-empty-changeset"
+                sh "sam deploy --resolve-s3 --no-confirm-changeset --no-fail-on-empty-changeset"
 
                 // Obtener URL de la API desplegada para las siguientes pruebas
                 sh "aws cloudformation describe-stacks --stack-name ${STACK_NAME} --query 'Stacks[0].Outputs[?OutputKey==`ApiUrl`].OutputValue' --output text > api_url.txt"
