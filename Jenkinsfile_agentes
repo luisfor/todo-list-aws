@@ -117,8 +117,10 @@ pipeline {
                 sh '''
                     git config user.name "Jenkins CI/CD"
                     git config user.email "jenkins@example.com"
+                    git reset --hard HEAD
                     git checkout master
-                    git merge develop --no-ff -m "Merge develop to master tras CI exitosa en Jenkins"
+                    git pull origin master
+                    git merge origin/develop --no-ff -m "Merge develop to master tras CI exitosa en Jenkins"
                     git push origin master
                 '''
             }
